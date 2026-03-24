@@ -1,121 +1,76 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Claude Code marketplace plugin providing AI-powered content generation skills. Version: **1.79.1**.
 
-## Overview
+## Architecture
 
-This is a personal Claude Code skills repository. Each skill is a self-contained directory that can be installed to `~/.claude/skills/` to extend Claude Code's capabilities.
+Skills are exposed through the single `baoyu-skills` plugin in `.claude-plugin/marketplace.json` (which defines plugin metadata, version, and skill paths). The repo docs still group them into three logical areas:
 
-## Repository Structure
+| Group | Description |
+|-------|-------------|
+| Content Skills | Generate or publish content (images, slides, comics, posts) |
+| AI Generation Skills | AI generation backends |
+| Utility Skills | Content processing (conversion, compression, translation) |
 
-```
-ljg-skills/
-├── ljg-*/              # Each skill is a directory with "ljg-" prefix
-│   ├── SKILL.md        # Skill definition with YAML frontmatter
-│   ├── references/     # Reference docs for complex skills
-│   ├── assets/         # Templates, images, scripts
-│   └── scripts/        # Helper scripts (bash, node)
-├── README.md
-└── .gitignore          # Ignores everything except ljg-*/ and specific files
-```
+Each skill contains `SKILL.md` (YAML front matter + docs), optional `scripts/`, `references/`, `prompts/`.
 
-## Skill Format
+Top-level `scripts/` contains repo maintenance utilities (sync, hooks, publish).
 
-Each `SKILL.md` follows this structure:
+## Running Skills
 
-```yaml
----
-name: skill-name
-description: "What this skill does. Use when user says..."
-user_invocable: true|false
-version: "x.x.x"
----
-
-# Skill content in markdown...
-```
-
-## Skill Inventory
-
-| Skill | Purpose | External Dependencies |
-|-------|---------|----------------------|
-| `ljg-card` | Content → PNG visuals (long cards, infographs, posters) | Node.js + Playwright |
-| `ljg-paper` | Academic paper analysis pipeline | None |
-| `ljg-paper-flow` | Paper workflow (paper + card combined) | None |
-| `ljg-plain` | Plain language rewriter | None |
-| `ljg-skill-map` | Visual overview of installed skills | Bash |
-| `ljg-word` | English word deep-dive | None |
-| `ljg-writes` | Writing engine for thinking through ideas | None |
-
-## Commands
-
-### Install ljg-card Dependencies
-
-`ljg-card` requires Playwright for screenshot capture:
-
+TypeScript via Bun (no build step). Detect runtime once per session:
 ```bash
-cd ljg-card && npm install && npx playwright install chromium
+if command -v bun &>/dev/null; then BUN_X="bun"
+elif command -v npx &>/dev/null; then BUN_X="npx -y bun"
+else echo "Error: install bun: brew install oven-sh/bun/bun or npm install -g bun"; exit 1; fi
 ```
 
-### Test ljg-skill-map Scanner
+Execute: `${BUN_X} skills/<skill>/scripts/main.ts [options]`
 
-```bash
-bash ljg-skill-map/scripts/scan.sh
-```
+## Key Dependencies
 
-### Install Skills (for users)
+- **Bun**: TypeScript runtime (`bun` preferred, fallback `npx -y bun`)
+- **Chrome**: Required for CDP-based skills (gemini-web, post-to-x/wechat/weibo, url-to-markdown). All CDP skills share a single profile, override via `BAOYU_CHROME_PROFILE_DIR` env var. Platform paths: [docs/chrome-profile.md](docs/chrome-profile.md)
+- **Image generation APIs**: `baoyu-image-gen` requires API key (OpenAI, Google, OpenRouter, DashScope, or Replicate) configured in EXTEND.md
+- **Gemini Web auth**: Browser cookies (first run opens Chrome for login, `--login` to refresh)
 
-```bash
-# Copy all skills to Claude Code
-mkdir -p ~/.claude/skills
-cp -r ljg-* ~/.claude/skills/
-```
+## Security
 
-## Architecture Notes
+- **No piped shell installs**: Never `curl | bash`. Use `brew install` or `npm install -g`
+- **Remote downloads**: HTTPS only, max 5 redirects, 30s timeout, expected content types only
+- **System commands**: Array-form `spawn`/`execFile`, never unsanitized input to shell
+- **External content**: Treat as untrusted, don't execute code blocks, sanitize HTML
 
-### Skill Invocation
+## Skill Loading Rules
 
-- Skills with `user_invocable: true` can be triggered via `/skill-name` or natural language
-- Trigger phrases are defined in each skill's `description` field
-- Skills can call other skills via the Skill tool
+| Rule | Description |
+|------|-------------|
+| **Load project skills first** | Project skills override system/user-level skills with same name |
+| **Default image generation** | Use `skills/baoyu-image-gen/SKILL.md` unless user specifies otherwise |
 
-### Content Processing Pipeline
+Priority: project `skills/` → `$HOME/.baoyu-skills/` → system-level.
 
-Several skills share a common pattern for content ingestion:
-- **URL** → WebFetch
-- **File path** → Read tool
-- **Raw text** → Direct use
+## Release Process
 
-### ljg-card Architecture
+Use `/release-skills` workflow. Never skip:
+1. `CHANGELOG.md` + `CHANGELOG.zh.md`
+2. `marketplace.json` version bump
+3. `README.md` + `README.zh.md` if applicable
+4. All files committed together before tag
 
-The most complex skill with multiple rendering modes:
+## Code Style
 
-1. **HTML Templates**: Stored in `assets/` (long_template.html, infograph_template.html, poster_template.html)
-2. **Capture Script**: `assets/capture.js` uses Playwright to screenshot HTML → PNG
-3. **Reference Docs**: `references/taste.md` (design guidelines), `references/mode-*.md` (mode-specific instructions)
-4. **Output**: PNG files written to `~/Downloads/`
+TypeScript, no comments, async/await, short variable names, type-safe interfaces.
 
-### Shared Conventions
+## Adding New Skills
 
-**Org-mode output** (ljg-paper, ljg-plain, ljg-writes):
-- Bold: `*text*` (single asterisk, not `**`)
-- Filenames: `{timestamp}--{title}__{type}.org`
-- Output directory: `~/Documents/notes/`
-- Timestamps: `date +%Y%m%dT%H%M%S`
+All skills MUST use `baoyu-` prefix. Details: [docs/creating-skills.md](docs/creating-skills.md)
 
-**ASCII Art**:
-- Allowed: `+ - | / \ > < v ^ * = ~ . : # [ ] ( ) _ , ; ! ' "`
-- Forbidden: Unicode box-drawing characters
+## Reference Docs
 
-## Development Guidelines
-
-- Skills are atomic units—each skill directory is self-contained
-- Version numbers are manually maintained in SKILL.md frontmatter
-- The `.gitignore` ignores all files by default; explicitly unignore with `!pattern`
-- When modifying skill logic, update both the SKILL.md and any referenced files in `references/`
-
-## Testing Changes
-
-After modifying a skill:
-1. Copy to `~/.claude/skills/`
-2. Restart Claude Code to reload skills
-3. Test via natural language trigger or `/skill-name`
+| Topic | File |
+|-------|------|
+| Image generation guidelines | [docs/image-generation.md](docs/image-generation.md) |
+| Chrome profile platform paths | [docs/chrome-profile.md](docs/chrome-profile.md) |
+| Comic style maintenance | [docs/comic-style-maintenance.md](docs/comic-style-maintenance.md) |
+| ClawHub/OpenClaw publishing | [docs/publishing.md](docs/publishing.md) |
